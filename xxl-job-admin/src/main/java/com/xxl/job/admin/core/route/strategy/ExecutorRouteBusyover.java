@@ -19,7 +19,7 @@ public class ExecutorRouteBusyover extends ExecutorRouter {
     public ReturnT<String> route(TriggerParam triggerParam, List<String> addressList) {
         StringBuffer idleBeatResultSB = new StringBuffer();
         for (String address : addressList) {
-            // beat
+            // 依次发送空闲心跳检测
             ReturnT<String> idleBeatResult = null;
             try {
                 ExecutorBiz executorBiz = XxlJobScheduler.getExecutorBiz(address);

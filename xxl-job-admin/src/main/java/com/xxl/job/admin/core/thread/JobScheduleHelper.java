@@ -31,6 +31,11 @@ public class JobScheduleHelper {
 
     private Thread scheduleThread;
     private Thread ringThread;
+
+    /**
+     * 是否停止调度线程，为true时会在完成正在执行的调度任务之后停止后续任务调度
+     * 实现更加优雅的关闭调度任务
+     */
     private volatile boolean scheduleThreadToStop = false;
     private volatile boolean ringThreadToStop = false;
     private volatile static Map<Integer, List<Integer>> ringData = new ConcurrentHashMap<>();
@@ -38,10 +43,11 @@ public class JobScheduleHelper {
     public void start(){
 
         // schedule thread
+        // 这个线程主要是预捞取待执行job，然后放到时间环中
         scheduleThread = new Thread(new Runnable() {
             @Override
             public void run() {
-
+                // 这里为什么要sleep一次？为了避免启动冲突？
                 try {
                     TimeUnit.MILLISECONDS.sleep(5000 - System.currentTimeMillis()%1000 );
                 } catch (InterruptedException e) {
@@ -83,11 +89,12 @@ public class JobScheduleHelper {
                             for (XxlJobInfo jobInfo: scheduleList) {
 
                                 // time-ring jump
+                                // 如果当前时间已经超过了预读取时间范围（任务卡住触发超时了），则根据配置的超时策略执行，默认跳过（DO_NOTHING）
                                 if (nowTime > jobInfo.getTriggerNextTime() + PRE_READ_MS) {
                                     // 2.1、trigger-expire > 5s：pass && make next-trigger-time
                                     logger.warn(">>>>>>>>>>> xxl-job, schedule misfire, jobId = " + jobInfo.getId());
 
-                                    // 1、misfire match
+                                    // 1、misfire match-如果配置策略为FIRE_ONCE_NOW则立刻触发一次执行
                                     MisfireStrategyEnum misfireStrategyEnum = MisfireStrategyEnum.match(jobInfo.getMisfireStrategy(), MisfireStrategyEnum.DO_NOTHING);
                                     if (MisfireStrategyEnum.FIRE_ONCE_NOW == misfireStrategyEnum) {
                                         // FIRE_ONCE_NOW 》 trigger
@@ -95,7 +102,7 @@ public class JobScheduleHelper {
                                         logger.debug(">>>>>>>>>>> xxl-job, schedule push trigger : jobId = " + jobInfo.getId() );
                                     }
 
-                                    // 2、fresh next
+                                    // 2、fresh next-更新下一次执行时间
                                     refreshNextValidTime(jobInfo, new Date());
 
                                 } else if (nowTime > jobInfo.getTriggerNextTime()) {
@@ -112,7 +119,7 @@ public class JobScheduleHelper {
                                     if (jobInfo.getTriggerStatus()==1 && nowTime + PRE_READ_MS > jobInfo.getTriggerNextTime()) {
 
                                         // 1、make ring second
-                                        int ringSecond = (int)((jobInfo.getTriggerNextTime()/1000)%60);
+                                        int ringSecond = (int)((jobInfo.getTriggerNextTime()/100)%60);
 
                                         // 2、push time ring
                                         pushTimeRing(ringSecond, jobInfo.getId());
@@ -196,6 +203,9 @@ public class JobScheduleHelper {
 
 
                     // Wait seconds, align second
+                    // 预捞取每秒最多执行一次
+                    // 如果预捞取整体耗时超过1秒则直接触发下一轮捞取
+                    // 如果整体耗时小于1s，如果本次触发捞取到了记录则sleep 1s，否则sleep 5s跳到下一次触发
                     if (cost < 1000) {  // scan-overtime, not wait
                         try {
                             // pre-read period: success > scan each second; fail > skip this period;
@@ -218,6 +228,7 @@ public class JobScheduleHelper {
 
 
         // ring thread
+        // 这个线程就是将上个线程放入时间环中的job取出然后依次触发
         ringThread = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -272,7 +283,7 @@ public class JobScheduleHelper {
     private void refreshNextValidTime(XxlJobInfo jobInfo, Date fromTime) throws Exception {
         Date nextValidTime = generateNextValidTime(jobInfo, fromTime);
         if (nextValidTime != null) {
-            jobInfo.setTriggerLastTime(jobInfo.getTriggerNextTime());
+            jobInfo.setTriggerLastTime(jobInfo.getTriggerNextTime()); // 这里不应该更新为当前时间吗
             jobInfo.setTriggerNextTime(nextValidTime.getTime());
         } else {
             jobInfo.setTriggerStatus(0);

@@ -58,9 +58,17 @@ public class XxlJobAdminConfig implements InitializingBean, DisposableBean {
     @Value("${spring.mail.from}")
     private String emailFrom;
 
+    /**
+     * "快速"任务触发的线程池最大线程数
+     * 对应线程池处理执行时间较短的快速任务
+     */
     @Value("${xxl.job.triggerpool.fast.max}")
     private int triggerPoolFastMax;
 
+    /**
+     * "慢速"任务触发的线程池最大线程数
+     * 对应线程池处理执行时间较长的快速任务，通常小于triggerPoolFastMax
+     */
     @Value("${xxl.job.triggerpool.slow.max}")
     private int triggerPoolSlowMax;
 
